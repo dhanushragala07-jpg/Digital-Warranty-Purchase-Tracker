@@ -157,6 +157,15 @@ def create_purchase(data: PurchaseIn, user: User = Depends(current_user), db: Se
     p = Purchase(owner_id=user.id, product_name=data.product_name.strip(), brand=data.brand.strip(), category=data.category, serial_number=serial, purchase_date=data.purchase_date, warranty_end=data.warranty_end, price_minor=data.price_minor, verification_status="pending")
     db.add(p); db.commit(); db.refresh(p)
     return p
+@app.patch("/api/v1/purchases/{purchase_id}", response_model=PurchaseOut)
+def update_purchase(purchase_id: int, data: PurchaseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    p = db.scalar(select(Purchase).where(Purchase.id == purchase_id, Purchase.owner_id == user.id))
+    if not p: raise HTTPException(status_code=404, detail="Purchase not found")
+    if data.warranty_end < data.purchase_date: raise HTTPException(status_code=422, detail="Warranty end date must not precede purchase date")
+    p.product_name=data.product_name.strip(); p.brand=data.brand.strip(); p.category=data.category; p.serial_number=data.serial_number.strip() if data.serial_number else None; p.purchase_date=data.purchase_date; p.warranty_end=data.warranty_end; p.price_minor=data.price_minor
+    db.commit(); db.refresh(p)
+    return p
+
 @app.post("/api/v1/purchases/{purchase_id}/invoice", status_code=201)
 async def upload_invoice(purchase_id: int, file: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
     p = db.scalar(select(Purchase).where(Purchase.id == purchase_id, Purchase.owner_id == user.id))
