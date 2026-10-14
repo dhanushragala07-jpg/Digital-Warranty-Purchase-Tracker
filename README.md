@@ -2,49 +2,32 @@
 
 A web platform for organizing purchases, keeping invoice evidence together, tracking warranty coverage, and managing warranty claims.
 
-## Current build
+## Repository contents
 
-The repository now includes a responsive static website prototype with:
+- `index.html`, `styles.css`, `app.js`: responsive customer/admin-preview frontend.
+- `backend/`: initial FastAPI API, MySQL Docker Compose setup, account registration/login, purchase records, private invoice upload, claim endpoints, admin review routes, and setup notes.
+- `.github/workflows/pages.yml`: static frontend deployment plus JavaScript/Python syntax checks.
 
-- Customer dashboard with purchase and warranty summary cards
-- Purchase registry with search and warranty-status filtering
-- Add-purchase form with date validation and duplicate serial-number warning
-- Warranty timeline
-- Demo claim creation and claim tracking
-- Admin preview for purchase and claim overview
-- Mobile-responsive layout
-- GitHub Actions workflow for publishing the static frontend with GitHub Pages
+## Live frontend
 
-**Important:** this is a frontend prototype. Demo records live in browser memory and reset when the page reloads. Login, real invoice uploads/OCR, backend verification, persistent records, and secure admin authorization are not connected yet.
+GitHub Pages URL: https://dhanushragala07-jpg.github.io/Digital-Warranty-Purchase-Tracker/
 
-## Architecture
+The current website is still a demo and uses in-memory sample data. It is **not yet connected** to the API. Customer accounts, real persistent frontend records, invoice OCR, and admin review are not yet available through the live UI.
 
-- **Frontend:** HTML, CSS, JavaScript; hosted on GitHub Pages
-- **Backend:** FastAPI (Python), to be connected after reviewing the existing API contract
-- **Database:** MySQL
-- **Document processing:** OCR-assisted invoice extraction, planned integration
+## Backend status
 
-GitHub Pages only hosts the static frontend. The FastAPI backend and MySQL database must be deployed separately for shared, cross-device data.
+An initial FastAPI backend is now present in `backend/`. See [`backend/README.md`](backend/README.md) for local Docker setup and API endpoints. The backend is a development scaffold and has not yet been deployed or independently security-tested. It uses SQLAlchemy, MySQL in Compose, password hashing, bearer tokens, owner-scoped purchase/claim access, and private invoice storage. OCR, email verification/password reset, rate limiting, audit history, migrations, file signature inspection, malware scanning, and production observability remain to be implemented.
 
-## Publish the frontend
+GitHub Pages hosts only static files. FastAPI and MySQL need a separate host and a secure production configuration for shared, cross-device data.
 
-1. Open the repository's **Settings → Pages**.
-2. Under **Build and deployment**, set **Source** to **GitHub Actions**.
-3. Open the **Actions** tab and check the `Deploy WarrantyHub frontend` workflow.
-4. When deployment succeeds, open **Settings → Pages** to find the published site URL.
+## Deployment workflow
 
-The workflow runs on each push to `main` and can also be started manually.
+The workflow runs on pushes to `main`. Check the repository's Actions tab for the latest result. The site URL appears in **Settings → Pages** after successful deployment.
 
-## Next steps
+## Security
 
-1. Review and connect the frontend to the existing FastAPI endpoints.
-2. Implement or complete missing purchase, invoice, and claim endpoints.
-3. Deploy FastAPI and MySQL with secure environment variables.
-4. Configure the frontend API URL and test workflows across devices.
-
-## Security notes
-
-- Never commit `.env` files, passwords, API keys, database credentials, or real invoice documents.
-- Store uploaded invoices privately and restrict access by authenticated user.
-- Enforce admin authorization and all important decisions in the backend, not only in the frontend.
-- Treat duplicate serial/IMEI matches as review flags, not proof of fraud.
+- Never commit `.env` files, credentials, API keys, or real invoice files.
+- Use unique production secrets and strong database credentials; configure them in the backend host's secret manager.
+- Do not expose MySQL directly to the public internet.
+- Admin privileges must only be assigned through a trusted bootstrap/administrative process, never public registration.
+- Duplicate serial/IMEI matches are review indicators, not proof of fraud.
