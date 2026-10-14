@@ -103,7 +103,7 @@ class ClaimOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int; owner_id: int; purchase_id: int; issue: str; status: str; admin_note: str | None; created_at: datetime
 app = FastAPI(title="Digital Warranty & Purchase Tracker API", version="0.1.0", description="Initial API for customer accounts, purchases, private invoice evidence and claims.")
-origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:5500,http://127.0.0.1:5500,http://localhost:8000").split(",") if x.strip()]
+origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "https://dhanushragala07-jpg.github.io,http://localhost:5500,http://127.0.0.1:5500,http://localhost:8000").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Authorization", "Content-Type"])
 def token_for(user: User) -> str:
     now = datetime.now(timezone.utc)
