@@ -25,7 +25,17 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 ALLOWED_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {})
+# Aiven requires TLS. PyMySQL expects SSL settings as connect arguments, not as
+# a URL query argument named "ssl-mode".
+if DATABASE_URL.startswith(("mysql://", "mariadb://")):
+    DATABASE_URL = DATABASE_URL.replace("mysql://", "mysql+pymysql://", 1).replace("mariadb://", "mysql+pymysql://", 1)
+    DATABASE_URL = DATABASE_URL.split("?")[0]  # discard provider query flags such as ssl-mode=REQUIRED
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={"check_same_thread": False})
+elif DATABASE_URL.startswith("mysql"):
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={"ssl": {}})
+else:
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 password_hash = PasswordHash.recommended()
 bearer = HTTPBearer(auto_error=False)
