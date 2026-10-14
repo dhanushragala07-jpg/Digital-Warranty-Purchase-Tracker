@@ -20,6 +20,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Check JavaScript syntax
+        run: node --check app.js
+      - name: Check Python syntax
+        run: python -m py_compile backend/main.py backend/create_admin.py
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload static website
