@@ -5,12 +5,12 @@ services:
     environment:
       MYSQL_DATABASE: warrantyhub
       MYSQL_USER: warrantyhub
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in your shell or .env}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in your shell or .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD}\""]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-development}
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in your environment}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       DATABASE_URL: mysql+pymysql://warrantyhub:${MYSQL_PASSWORD}@db:3306/warrantyhub
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5500,http://127.0.0.1:5500}
       UPLOAD_DIR: /srv/private_uploads
