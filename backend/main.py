@@ -73,6 +73,21 @@ class Claim(Base):
     status: Mapped[str] = mapped_column(String(30), default="submitted")
     admin_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+class AdminProductRecord(Base):
+    __tablename__ = "admin_product_records"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_email: Mapped[str] = mapped_column(String(320), index=True)
+    product_name: Mapped[str] = mapped_column(String(160))
+    brand: Mapped[str] = mapped_column(String(120))
+    category: Mapped[str] = mapped_column(String(40))
+    serial_number: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
+    purchase_date: Mapped[date] = mapped_column(Date)
+    warranty_end: Mapped[date] = mapped_column(Date)
+    price_minor: Mapped[int] = mapped_column(Integer)
+    evidence_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 Base.metadata.create_all(engine)
 
 def get_db():
@@ -92,6 +107,17 @@ class PurchaseIn(BaseModel):
     purchase_date: date
     warranty_end: date
     price_minor: int = Field(ge=0, le=100_000_000_00)
+class AdminRecordIn(BaseModel):
+    customer_email: EmailStr
+    product_name: str = Field(min_length=1, max_length=160)
+    brand: str = Field(min_length=1, max_length=120)
+    category: Literal["phone", "laptop", "watch", "audio", "camera", "other"] = "other"
+    serial_number: str | None = Field(default=None, max_length=180)
+    purchase_date: date
+    warranty_end: date
+    price_minor: int = Field(ge=0, le=100_000_000_00)
+    evidence_note: str | None = Field(default=None, max_length=2000)
+
 class ClaimIn(BaseModel): purchase_id: int; issue: str = Field(min_length=5, max_length=4000)
 class ReviewIn(BaseModel): status: Literal["verified", "rejected"]; note: str | None = Field(default=None, max_length=2000)
 class UserOut(BaseModel): id: int; email: str; name: str; role: str
@@ -191,6 +217,18 @@ def create_claim(data: ClaimIn, user: User = Depends(current_user), db: Session 
     if p.warranty_end < date.today(): raise HTTPException(status_code=422, detail="The recorded warranty has expired; confirm seller policy before opening a claim")
     c = Claim(owner_id=user.id, purchase_id=p.id, issue=data.issue.strip(), status="submitted")
     db.add(c); db.commit(); db.refresh(c); return c
+@app.get("/api/v1/admin/product-records")
+def list_admin_product_records(user: User = Depends(admin_user), db: Session = Depends(get_db)):
+    rows = db.scalars(select(AdminProductRecord).order_by(AdminProductRecord.created_at.desc())).all()
+    return [{ "id": r.id, "customer_email": r.customer_email, "product_name": r.product_name, "brand": r.brand, "category": r.category, "serial_number": r.serial_number, "purchase_date": r.purchase_date, "warranty_end": r.warranty_end, "price_minor": r.price_minor, "evidence_note": r.evidence_note, "created_at": r.created_at } for r in rows]
+@app.post("/api/v1/admin/product-records", status_code=201)
+def create_admin_product_record(data: AdminRecordIn, user: User = Depends(admin_user), db: Session = Depends(get_db)):
+    if data.warranty_end < data.purchase_date:
+        raise HTTPException(status_code=422, detail="Warranty end date must not precede purchase date")
+    record = AdminProductRecord(customer_email=str(data.customer_email).lower().strip(), product_name=data.product_name.strip(), brand=data.brand.strip(), category=data.category, serial_number=data.serial_number.strip() if data.serial_number else None, purchase_date=data.purchase_date, warranty_end=data.warranty_end, price_minor=data.price_minor, evidence_note=data.evidence_note, created_by=user.id)
+    db.add(record); db.commit(); db.refresh(record)
+    return {"id": record.id, "customer_email": record.customer_email, "product_name": record.product_name, "brand": record.brand, "category": record.category, "serial_number": record.serial_number, "purchase_date": record.purchase_date, "warranty_end": record.warranty_end, "price_minor": record.price_minor, "evidence_note": record.evidence_note, "created_at": record.created_at}
+
 @app.get("/api/v1/admin/purchases", response_model=list[PurchaseOut])
 def admin_purchases(user: User = Depends(admin_user), db: Session = Depends(get_db)):
     return db.scalars(select(Purchase).order_by(Purchase.created_at.desc())).all()
