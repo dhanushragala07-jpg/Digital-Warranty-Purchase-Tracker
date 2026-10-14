@@ -21,7 +21,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Check JavaScript syntax
-        run: node --check app.js
+        run: node --check app.js && node --check integration.js
       - name: Check Python syntax
         run: python -m py_compile backend/main.py backend/create_admin.py
       - name: Install backend test dependencies
