@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <meta name="description" content="WarrantyHub administrator portal for product verification and warranty claim review.">
+  <title>WarrantyHub — Admin Portal</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="admin.html" aria-label="WarrantyHub admin home"><span class="brand-mark">W</span><span>Warranty<span class="brand-light">Hub</span><small>Admin operations</small></span></a>
+      <div class="nav-label">ADMIN WORKSPACE</div>
+      <nav class="nav-list" aria-label="Administrator navigation">
+        <button class="nav-item active" data-view="admin"><span>▦</span> Admin dashboard</button>
+      </nav>
+      <div class="sidebar-bottom"><div class="secure-icon">✓</div><strong>Restricted workspace</strong><p>Only accounts assigned the administrator role can access this portal.</p><span class="demo-label">ADMIN ONLY</span></div>
+    </aside>
+    <main class="main-area">
+      <header class="topbar"><button class="mobile-menu" id="menuToggle" aria-label="Toggle menu">☰</button><div class="breadcrumb">WarrantyHub <span>/</span> <strong id="breadcrumbCurrent">Admin dashboard</strong></div><div class="top-actions"><span class="status-dot"></span><span class="demo-status">Administrator portal</span><button class="avatar" title="Administrator profile">AD</button></div></header>
+      <section class="page-content" id="pageContent" aria-live="polite"></section>
+      <footer>WarrantyHub <span>•</span> Administrator portal <span class="footer-right">Protected by server-side role checks</span></footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+  <script src="integration.js"></script>
+</body>
+</html>
