@@ -1,4 +1,4 @@
-import os, uuid, hashlib, smtplib, html
+import os, uuid, hashlib, smtplib, html, logging
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from email.message import EmailMessage
@@ -188,6 +188,8 @@ def send_purchase_confirmation(recipient: str, product_name: str, token: str):
             server.login(smtp_user, smtp_password)
             server.send_message(msg)
     except Exception as exc:
+        # Log the SMTP exception type/message for debugging; never log credentials.
+        logging.error("Purchase confirmation email failed (%s): %s", type(exc).__name__, exc)
         raise HTTPException(status_code=502, detail="Confirmation email could not be sent. Check SMTP settings on Render.") from exc
 
 
