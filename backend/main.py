@@ -180,7 +180,33 @@ def list_purchases(user: User = Depends(current_user), db: Session = Depends(get
 def create_purchase(data: PurchaseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if data.warranty_end < data.purchase_date: raise HTTPException(status_code=422, detail="Warranty end must not precede purchase date")
     serial = data.serial_number.strip() if data.serial_number else None
-    p = Purchase(owner_id=user.id, product_name=data.product_name.strip(), brand=data.brand.strip(), category=data.category, serial_number=serial, purchase_date=data.purchase_date, warranty_end=data.warranty_end, price_minor=data.price_minor, verification_status="pending")
+    product_name, brand = data.product_name.strip(), data.brand.strip()
+    duplicate_query = select(Purchase).where(
+        Purchase.owner_id == user.id,
+        Purchase.product_name == product_name,
+        Purchase.brand == brand,
+        Purchase.purchase_date == data.purchase_date,
+        Purchase.warranty_end == data.warranty_end,
+        Purchase.price_minor == data.price_minor
+    )
+    if serial:
+        duplicate_query = duplicate_query.where(Purchase.serial_number == serial)
+    else:
+        duplicate_query = duplicate_query.where(Purchase.serial_number.is_(None))
+    if db.scalar(duplicate_query.limit(1)):
+        raise HTTPException(status_code=409, detail="This purchase was already submitted. Duplicate creation blocked.")
+    approved = None
+    if serial:
+        approved = db.scalar(select(AdminProductRecord).where(
+            AdminProductRecord.customer_email == str(user.email).lower(),
+            AdminProductRecord.serial_number == serial
+        ).limit(1))
+    matches_admin = bool(approved and approved.product_name.strip().lower() == product_name.lower()
+        and approved.brand.strip().lower() == brand.lower()
+        and approved.purchase_date == data.purchase_date
+        and approved.warranty_end == data.warranty_end
+        and approved.price_minor == data.price_minor)
+    p = Purchase(owner_id=user.id, product_name=product_name, brand=brand, category=data.category, serial_number=serial, purchase_date=data.purchase_date, warranty_end=data.warranty_end, price_minor=data.price_minor, verification_status="verified" if matches_admin else "rejected")
     db.add(p); db.commit(); db.refresh(p)
     return p
 @app.patch("/api/v1/purchases/{purchase_id}", response_model=PurchaseOut)
