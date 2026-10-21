@@ -1,4 +1,4 @@
-import os, uuid, hashlib, smtplib, html, logging
+import os, uuid, hashlib, smtplib, html, logging, json, urllib.request, urllib.error
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from email.message import EmailMessage
@@ -168,30 +168,58 @@ def to_user(user: User): return UserOut(id=user.id, email=user.email, name=user.
 def sign_in(user: User): return TokenOut(access_token=token_for(user), user=to_user(user))
 
 def send_purchase_confirmation(recipient: str, product_name: str, token: str):
-    host = os.getenv("SMTP_HOST", "").strip()
-    smtp_user = os.getenv("SMTP_USER", "").strip()
-    smtp_password = os.getenv("SMTP_PASSWORD", "")
-    sender = os.getenv("SMTP_FROM", smtp_user).strip()
-    port = int(os.getenv("SMTP_PORT", "587"))
-    if not all([host, smtp_user, smtp_password, sender]):
-        raise HTTPException(status_code=503, detail="Email is not configured on Render. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD and SMTP_FROM.")
+    # Use Resend's HTTPS API because this hosting environment cannot reach SMTP.
+    api_key = os.getenv("RESEND_API_KEY", "").strip()
+    sender = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Email is not configured. Set RESEND_API_KEY on Render.")
     base = os.getenv("API_PUBLIC_URL", "https://digital-warranty-purchase-tracker.onrender.com").rstrip("/")
-    msg = EmailMessage()
-    msg["Subject"] = f"Confirm purchase record: {product_name}"
-    msg["From"] = sender
-    msg["To"] = recipient
-    msg.set_content(f"An administrator entered a purchase record for {product_name}. Accept only if these details are correct.\n\nAccept: {base}/api/v1/purchase-confirmation?token={token}&decision=accept\nReject: {base}/api/v1/purchase-confirmation?token={token}&decision=reject")
-    msg.add_alternative(f"<p>An administrator entered a purchase record for <b>{html.escape(product_name)}</b>.</p><p>Accept only if these details are correct.</p><p><a href='{base}/api/v1/purchase-confirmation?token={token}&amp;decision=accept'>Accept and save purchase</a></p><p><a href='{base}/api/v1/purchase-confirmation?token={token}&amp;decision=reject'>Reject purchase</a></p>", subtype="html")
+    accept_url = f"{base}/api/v1/purchase-confirmation?token={token}&decision=accept"
+    reject_url = f"{base}/api/v1/purchase-confirmation?token={token}&decision=reject"
+    safe_product = html.escape(product_name)
+    text_body = (
+        f"An administrator entered a purchase record for {product_name}. "
+        "Accept only if these details are correct.\\n\\n"
+        f"Accept: {accept_url}\\nReject: {reject_url}"
+    )
+    html_body = (
+        f"<p>An administrator entered a purchase record for <b>{safe_product}</b>.</p>"
+        "<p>Accept only if these details are correct.</p>"
+        f"<p><a href=\"{html.escape(accept_url, quote=True)}\">Accept and save purchase</a></p>"
+        f"<p><a href=\"{html.escape(reject_url, quote=True)}\">Reject purchase</a></p>"
+    )
+    payload = json.dumps({
+        "from": sender,
+        "to": [recipient],
+        "subject": f"Confirm purchase record: {product_name}",
+        "text": text_body,
+        "html": html_body,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "Digital-Warranty-Purchase-Tracker/1.0",
+        },
+        method="POST",
+    )
     try:
-        with smtplib.SMTP(host, port, timeout=15) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.send_message(msg)
+        with urllib.request.urlopen(request, timeout=20) as response:
+            if response.status < 200 or response.status >= 300:
+                raise RuntimeError(f"Resend returned HTTP {response.status}")
+    except urllib.error.HTTPError as exc:
+        # Do not log request headers or API keys.
+        try:
+            detail = exc.read(1000).decode("utf-8", errors="replace")
+        except Exception:
+            detail = "No response body"
+        logging.error("Resend email failed (HTTP %s): %s", exc.code, detail)
+        raise HTTPException(status_code=502, detail="Confirmation email could not be sent. Check Resend settings on Render.") from exc
     except Exception as exc:
-        # Log the SMTP exception type/message for debugging; never log credentials.
-        logging.error("Purchase confirmation email failed (%s): %s", type(exc).__name__, exc)
-        raise HTTPException(status_code=502, detail="Confirmation email could not be sent. Check SMTP settings on Render.") from exc
-
+        logging.error("Resend email failed (%s): %s", type(exc).__name__, exc)
+        raise HTTPException(status_code=502, detail="Confirmation email could not be sent. Check Resend settings on Render.") from exc
 
 @app.get("/health")
 def health(): return {"status": "ok", "service": "warrantyhub-api"}
