@@ -1,6 +1,7 @@
-import os, uuid, hashlib
+import os, uuid, hashlib, smtplib, html
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from email.message import EmailMessage
 from typing import Literal
 
 import jwt
@@ -64,6 +65,23 @@ class Purchase(Base):
     invoice_status: Mapped[str] = mapped_column(String(30), default="not_uploaded")
     verification_status: Mapped[str] = mapped_column(String(30), default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class PendingAdminPurchase(Base):
+    __tablename__ = "pending_admin_purchases"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_email: Mapped[str] = mapped_column(String(320), index=True)
+    product_name: Mapped[str] = mapped_column(String(160))
+    brand: Mapped[str] = mapped_column(String(120))
+    category: Mapped[str] = mapped_column(String(40))
+    serial_number: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
+    purchase_date: Mapped[date] = mapped_column(Date)
+    warranty_end: Mapped[date] = mapped_column(Date)
+    price_minor: Mapped[int] = mapped_column(Integer)
+    evidence_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 class Claim(Base):
     __tablename__ = "claims"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -148,6 +166,31 @@ def admin_user(user: User = Depends(current_user)) -> User:
     return user
 def to_user(user: User): return UserOut(id=user.id, email=user.email, name=user.name, role=user.role)
 def sign_in(user: User): return TokenOut(access_token=token_for(user), user=to_user(user))
+
+def send_purchase_confirmation(recipient: str, product_name: str, token: str):
+    host = os.getenv("SMTP_HOST", "").strip()
+    smtp_user = os.getenv("SMTP_USER", "").strip()
+    smtp_password = os.getenv("SMTP_PASSWORD", "")
+    sender = os.getenv("SMTP_FROM", smtp_user).strip()
+    port = int(os.getenv("SMTP_PORT", "587"))
+    if not all([host, smtp_user, smtp_password, sender]):
+        raise HTTPException(status_code=503, detail="Email is not configured on Render. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD and SMTP_FROM.")
+    base = os.getenv("API_PUBLIC_URL", "https://digital-warranty-purchase-tracker.onrender.com").rstrip("/")
+    msg = EmailMessage()
+    msg["Subject"] = f"Confirm purchase record: {product_name}"
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg.set_content(f"An administrator entered a purchase record for {product_name}. Accept only if these details are correct.\n\nAccept: {base}/api/v1/purchase-confirmation?token={token}&decision=accept\nReject: {base}/api/v1/purchase-confirmation?token={token}&decision=reject")
+    msg.add_alternative(f"<p>An administrator entered a purchase record for <b>{html.escape(product_name)}</b>.</p><p>Accept only if these details are correct.</p><p><a href='{base}/api/v1/purchase-confirmation?token={token}&amp;decision=accept'>Accept and save purchase</a></p><p><a href='{base}/api/v1/purchase-confirmation?token={token}&amp;decision=reject'>Reject purchase</a></p>", subtype="html")
+    try:
+        with smtplib.SMTP(host, port, timeout=15) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Confirmation email could not be sent. Check SMTP settings on Render.") from exc
+
+
 @app.get("/health")
 def health(): return {"status": "ok", "service": "warrantyhub-api"}
 @app.get("/api/v1/health")
@@ -247,13 +290,46 @@ def create_claim(data: ClaimIn, user: User = Depends(current_user), db: Session 
 def list_admin_product_records(user: User = Depends(admin_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(AdminProductRecord).order_by(AdminProductRecord.created_at.desc())).all()
     return [{ "id": r.id, "customer_email": r.customer_email, "product_name": r.product_name, "brand": r.brand, "category": r.category, "serial_number": r.serial_number, "purchase_date": r.purchase_date, "warranty_end": r.warranty_end, "price_minor": r.price_minor, "evidence_note": r.evidence_note, "created_at": r.created_at } for r in rows]
-@app.post("/api/v1/admin/product-records", status_code=201)
+
+@app.post("/api/v1/admin/product-records", status_code=202)
 def create_admin_product_record(data: AdminRecordIn, user: User = Depends(admin_user), db: Session = Depends(get_db)):
     if data.warranty_end < data.purchase_date:
         raise HTTPException(status_code=422, detail="Warranty end date must not precede purchase date")
-    record = AdminProductRecord(customer_email=str(data.customer_email).lower().strip(), product_name=data.product_name.strip(), brand=data.brand.strip(), category=data.category, serial_number=data.serial_number.strip() if data.serial_number else None, purchase_date=data.purchase_date, warranty_end=data.warranty_end, price_minor=data.price_minor, evidence_note=data.evidence_note, created_by=user.id)
-    db.add(record); db.commit(); db.refresh(record)
-    return {"id": record.id, "customer_email": record.customer_email, "product_name": record.product_name, "brand": record.brand, "category": record.category, "serial_number": record.serial_number, "purchase_date": record.purchase_date, "warranty_end": record.warranty_end, "price_minor": record.price_minor, "evidence_note": record.evidence_note, "created_at": record.created_at}
+    pending = PendingAdminPurchase(customer_email=str(data.customer_email).lower().strip(), product_name=data.product_name.strip(), brand=data.brand.strip(), category=data.category, serial_number=data.serial_number.strip() if data.serial_number else None, purchase_date=data.purchase_date, warranty_end=data.warranty_end, price_minor=data.price_minor, evidence_note=data.evidence_note, created_by=user.id, status="pending")
+    db.add(pending)
+    db.commit()
+    db.refresh(pending)
+    token = jwt.encode({"pending_id": pending.id, "exp": datetime.now(timezone.utc) + timedelta(days=3)}, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    try:
+        send_purchase_confirmation(pending.customer_email, pending.product_name, token)
+    except Exception:
+        db.delete(pending)
+        db.commit()
+        raise
+    return {"message": "Confirmation email sent. The admin purchase record will only be saved after the customer accepts.", "status": "pending_confirmation"}
+
+@app.get("/api/v1/purchase-confirmation")
+def confirm_admin_purchase(token: str, decision: Literal["accept", "reject"], db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        pending_id = int(payload["pending_id"])
+    except (jwt.InvalidTokenError, KeyError, ValueError):
+        raise HTTPException(status_code=400, detail="Confirmation link is invalid or expired.")
+    pending = db.get(PendingAdminPurchase, pending_id)
+    if not pending or pending.status != "pending":
+        return {"message": "This confirmation has already been handled or is unavailable."}
+    if decision == "reject":
+        pending.status = "rejected"
+        db.commit()
+        return {"message": "Purchase rejected. It was not saved to the approved admin purchase list."}
+    existing = None
+    if pending.serial_number:
+        existing = db.scalar(select(AdminProductRecord).where(AdminProductRecord.customer_email == pending.customer_email, AdminProductRecord.serial_number == pending.serial_number).limit(1))
+    if not existing:
+        db.add(AdminProductRecord(customer_email=pending.customer_email, product_name=pending.product_name, brand=pending.brand, category=pending.category, serial_number=pending.serial_number, purchase_date=pending.purchase_date, warranty_end=pending.warranty_end, price_minor=pending.price_minor, evidence_note=pending.evidence_note, created_by=pending.created_by))
+    pending.status = "accepted"
+    db.commit()
+    return {"message": "Purchase accepted and saved to the approved admin purchase list. The customer can now register it."}
 
 @app.get("/api/v1/admin/purchases", response_model=list[PurchaseOut])
 def admin_purchases(user: User = Depends(admin_user), db: Session = Depends(get_db)):
