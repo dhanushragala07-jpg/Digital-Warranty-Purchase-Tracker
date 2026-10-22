@@ -250,6 +250,24 @@ def list_purchases(user: User = Depends(current_user), db: Session = Depends(get
     today = date.today()
     return [{**PurchaseOut.model_validate(p).model_dump(mode="json"), "warranty_state": "expired" if p.warranty_end < today else "expiring" if (p.warranty_end-today).days <= 45 else "active", "possible_duplicate": duplicate_flag(db,p.serial_number,p.id)} for p in rows]
 @app.post("/api/v1/purchases", response_model=PurchaseOut, status_code=201)
+def match_approved_admin_record(db: Session, user: User, *, product_name: str, brand: str, category: str, serial_number: str | None, purchase_date: date, warranty_end: date, price_minor: int) -> bool:
+    # Only an already-approved record for this customer's account can validate a purchase.
+    if not serial_number:
+        return False
+    approved = db.scalar(select(AdminProductRecord).where(
+        AdminProductRecord.customer_email == str(user.email).lower().strip(),
+        AdminProductRecord.serial_number == serial_number.strip()
+    ).limit(1))
+    return bool(
+        approved
+        and approved.product_name.strip().casefold() == product_name.strip().casefold()
+        and approved.brand.strip().casefold() == brand.strip().casefold()
+        and approved.category == category
+        and approved.purchase_date == purchase_date
+        and approved.warranty_end == warranty_end
+        and approved.price_minor == price_minor
+    )
+
 def create_purchase(data: PurchaseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if data.warranty_end < data.purchase_date: raise HTTPException(status_code=422, detail="Warranty end must not precede purchase date")
     serial = data.serial_number.strip() if data.serial_number else None
@@ -268,17 +286,11 @@ def create_purchase(data: PurchaseIn, user: User = Depends(current_user), db: Se
         duplicate_query = duplicate_query.where(Purchase.serial_number.is_(None))
     if db.scalar(duplicate_query.limit(1)):
         raise HTTPException(status_code=409, detail="This purchase was already submitted. Duplicate creation blocked.")
-    approved = None
-    if serial:
-        approved = db.scalar(select(AdminProductRecord).where(
-            AdminProductRecord.customer_email == str(user.email).lower(),
-            AdminProductRecord.serial_number == serial
-        ).limit(1))
-    matches_admin = bool(approved and approved.product_name.strip().lower() == product_name.lower()
-        and approved.brand.strip().lower() == brand.lower()
-        and approved.purchase_date == data.purchase_date
-        and approved.warranty_end == data.warranty_end
-        and approved.price_minor == data.price_minor)
+    matches_admin = match_approved_admin_record(
+        db, user, product_name=product_name, brand=brand, category=data.category,
+        serial_number=serial, purchase_date=data.purchase_date,
+        warranty_end=data.warranty_end, price_minor=data.price_minor
+    )
     p = Purchase(owner_id=user.id, product_name=product_name, brand=brand, category=data.category, serial_number=serial, purchase_date=data.purchase_date, warranty_end=data.warranty_end, price_minor=data.price_minor, verification_status="verified" if matches_admin else "rejected")
     db.add(p); db.commit(); db.refresh(p)
     return p
@@ -288,6 +300,11 @@ def update_purchase(purchase_id: int, data: PurchaseIn, user: User = Depends(cur
     if not p: raise HTTPException(status_code=404, detail="Purchase not found")
     if data.warranty_end < data.purchase_date: raise HTTPException(status_code=422, detail="Warranty end date must not precede purchase date")
     p.product_name=data.product_name.strip(); p.brand=data.brand.strip(); p.category=data.category; p.serial_number=data.serial_number.strip() if data.serial_number else None; p.purchase_date=data.purchase_date; p.warranty_end=data.warranty_end; p.price_minor=data.price_minor
+    p.verification_status = "verified" if match_approved_admin_record(
+        db, user, product_name=p.product_name, brand=p.brand, category=p.category,
+        serial_number=p.serial_number, purchase_date=p.purchase_date,
+        warranty_end=p.warranty_end, price_minor=p.price_minor
+    ) else "rejected"
     db.commit(); db.refresh(p)
     return p
 
