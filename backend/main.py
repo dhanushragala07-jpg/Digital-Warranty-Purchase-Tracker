@@ -291,7 +291,12 @@ def create_purchase(data: PurchaseIn, user: User = Depends(current_user), db: Se
         serial_number=serial, purchase_date=data.purchase_date,
         warranty_end=data.warranty_end, price_minor=data.price_minor
     )
-    p = Purchase(owner_id=user.id, product_name=product_name, brand=brand, category=data.category, serial_number=serial, purchase_date=data.purchase_date, warranty_end=data.warranty_end, price_minor=data.price_minor, verification_status="verified" if matches_admin else "rejected")
+    if not matches_admin:
+        raise HTTPException(
+            status_code=422,
+            detail="INVALID PURCHASE: No matching approved admin record was found, or one or more details do not match. This purchase was not saved. Check the details with the administrator."
+        )
+    p = Purchase(owner_id=user.id, product_name=product_name, brand=brand, category=data.category, serial_number=serial, purchase_date=data.purchase_date, warranty_end=data.warranty_end, price_minor=data.price_minor, verification_status="verified")
     db.add(p); db.commit(); db.refresh(p)
     return p
 @app.patch("/api/v1/purchases/{purchase_id}", response_model=PurchaseOut)
@@ -299,12 +304,18 @@ def update_purchase(purchase_id: int, data: PurchaseIn, user: User = Depends(cur
     p = db.scalar(select(Purchase).where(Purchase.id == purchase_id, Purchase.owner_id == user.id))
     if not p: raise HTTPException(status_code=404, detail="Purchase not found")
     if data.warranty_end < data.purchase_date: raise HTTPException(status_code=422, detail="Warranty end date must not precede purchase date")
-    p.product_name=data.product_name.strip(); p.brand=data.brand.strip(); p.category=data.category; p.serial_number=data.serial_number.strip() if data.serial_number else None; p.purchase_date=data.purchase_date; p.warranty_end=data.warranty_end; p.price_minor=data.price_minor
-    p.verification_status = "verified" if match_approved_admin_record(
-        db, user, product_name=p.product_name, brand=p.brand, category=p.category,
-        serial_number=p.serial_number, purchase_date=p.purchase_date,
-        warranty_end=p.warranty_end, price_minor=p.price_minor
-    ) else "rejected"
+    new_serial = data.serial_number.strip() if data.serial_number else None
+    if not match_approved_admin_record(
+        db, user, product_name=data.product_name.strip(), brand=data.brand.strip(),
+        category=data.category, serial_number=new_serial, purchase_date=data.purchase_date,
+        warranty_end=data.warranty_end, price_minor=data.price_minor
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="INVALID PURCHASE: The edited details do not match an approved admin record. Your existing saved purchase was not changed."
+        )
+    p.product_name=data.product_name.strip(); p.brand=data.brand.strip(); p.category=data.category; p.serial_number=new_serial; p.purchase_date=data.purchase_date; p.warranty_end=data.warranty_end; p.price_minor=data.price_minor
+    p.verification_status = "verified"
     db.commit(); db.refresh(p)
     return p
 
