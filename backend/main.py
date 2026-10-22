@@ -344,6 +344,17 @@ def create_claim(data: ClaimIn, user: User = Depends(current_user), db: Session 
     if p.warranty_end < date.today(): raise HTTPException(status_code=422, detail="The recorded warranty has expired; confirm seller policy before opening a claim")
     c = Claim(owner_id=user.id, purchase_id=p.id, issue=data.issue.strip(), status="submitted")
     db.add(c); db.commit(); db.refresh(c); return c
+@app.get("/api/v1/admin/admin-submissions")
+def list_admin_submissions(user: User = Depends(admin_user), db: Session = Depends(get_db)):
+    rows = db.scalars(select(PendingAdminPurchase).order_by(PendingAdminPurchase.created_at.desc())).all()
+    return [{
+        "id": r.id, "customer_email": r.customer_email, "product_name": r.product_name,
+        "brand": r.brand, "category": r.category, "serial_number": r.serial_number,
+        "purchase_date": r.purchase_date, "warranty_end": r.warranty_end,
+        "price_minor": r.price_minor, "evidence_note": r.evidence_note,
+        "status": r.status, "created_at": r.created_at
+    } for r in rows]
+
 @app.get("/api/v1/admin/product-records")
 def list_admin_product_records(user: User = Depends(admin_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(AdminProductRecord).order_by(AdminProductRecord.created_at.desc())).all()
