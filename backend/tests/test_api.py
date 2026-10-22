@@ -37,16 +37,40 @@ def test_customer_cannot_access_admin_routes():
     response = client.get("/api/v1/admin/purchases", headers={"Authorization":f"Bearer {token}"})
     assert response.status_code == 403
 
-def test_purchase_is_owner_scoped_and_claim_created():
-    token1 = register("one@example.com")
-    token2 = register("two@example.com")
-    headers1 = {"Authorization":f"Bearer {token1}"}
-    headers2 = {"Authorization":f"Bearer {token2}"}
-    response = client.post("/api/v1/purchases", headers=headers1, json={"product_name":"Laptop","brand":"Example","category":"laptop","serial_number":"SERIAL-123","purchase_date":"2026-01-01","warranty_end":"2027-01-01","price_minor":1250000})
+def test_unmatched_purchase_is_rejected_and_not_saved():
+    token = register()
+    headers = {"Authorization": f"Bearer {token}"}
+    payload = {"product_name":"Laptop","brand":"Example","category":"laptop","serial_number":"SERIAL-123","purchase_date":"2026-01-01","warranty_end":"2027-01-01","price_minor":1250000}
+    response = client.post("/api/v1/purchases", headers=headers, json=payload)
+    assert response.status_code == 422, response.text
+    assert "INVALID PURCHASE" in response.json()["detail"]
+    assert client.get("/api/v1/purchases", headers=headers).json() == []
+
+def test_only_exact_approved_admin_match_can_be_saved():
+    from main import AdminProductRecord, SessionLocal, User
+    token = register("one@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    me = client.get("/api/v1/auth/me", headers=headers).json()
+    with SessionLocal() as db:
+        customer = db.get(User, me["id"])
+        db.add(AdminProductRecord(
+            customer_email="one@example.com",
+            product_name="Laptop",
+            brand="Example",
+            category="laptop",
+            serial_number="SERIAL-123",
+            purchase_date=__import__("datetime").date(2026, 1, 1),
+            warranty_end=__import__("datetime").date(2027, 1, 1),
+            price_minor=1250000,
+            evidence_note="Test approved record",
+            created_by=customer.id,
+        ))
+        db.commit()
+    payload = {"product_name":"Laptop","brand":"Example","category":"laptop","serial_number":"SERIAL-123","purchase_date":"2026-01-01","warranty_end":"2027-01-01","price_minor":1250000}
+    response = client.post("/api/v1/purchases", headers=headers, json=payload)
     assert response.status_code == 201, response.text
-    purchase_id = response.json()["id"]
-    assert len(client.get("/api/v1/purchases", headers=headers1).json()) == 1
-    assert client.get("/api/v1/purchases", headers=headers2).json() == []
-    claim = client.post("/api/v1/claims", headers=headers1, json={"purchase_id":purchase_id,"issue":"Battery no longer charges"})
-    assert claim.status_code == 201, claim.text
-    assert client.post("/api/v1/claims", headers=headers2, json={"purchase_id":purchase_id,"issue":"Battery no longer charges"}).status_code == 404
+    assert response.json()["verification_status"] == "verified"
+    mismatch = {**payload, "brand":"Different brand", "serial_number":"SERIAL-123"}
+    rejected = client.post("/api/v1/purchases", headers=headers, json=mismatch)
+    assert rejected.status_code == 422
+    assert len(client.get("/api/v1/purchases", headers=headers).json()) == 1
