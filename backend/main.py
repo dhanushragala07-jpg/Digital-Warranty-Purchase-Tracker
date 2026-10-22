@@ -249,7 +249,6 @@ def list_purchases(user: User = Depends(current_user), db: Session = Depends(get
     rows = db.scalars(select(Purchase).where(Purchase.owner_id == user.id).order_by(Purchase.created_at.desc())).all()
     today = date.today()
     return [{**PurchaseOut.model_validate(p).model_dump(mode="json"), "warranty_state": "expired" if p.warranty_end < today else "expiring" if (p.warranty_end-today).days <= 45 else "active", "possible_duplicate": duplicate_flag(db,p.serial_number,p.id)} for p in rows]
-@app.post("/api/v1/purchases", response_model=PurchaseOut, status_code=201)
 def match_approved_admin_record(db: Session, user: User, *, product_name: str, brand: str, category: str, serial_number: str | None, purchase_date: date, warranty_end: date, price_minor: int) -> bool:
     # Only an already-approved record for this customer's account can validate a purchase.
     if not serial_number:
@@ -268,6 +267,7 @@ def match_approved_admin_record(db: Session, user: User, *, product_name: str, b
         and approved.price_minor == price_minor
     )
 
+@app.post("/api/v1/purchases", response_model=PurchaseOut, status_code=201)
 def create_purchase(data: PurchaseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if data.warranty_end < data.purchase_date: raise HTTPException(status_code=422, detail="Warranty end must not precede purchase date")
     serial = data.serial_number.strip() if data.serial_number else None
