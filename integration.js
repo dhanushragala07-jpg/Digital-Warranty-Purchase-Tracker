@@ -21,6 +21,7 @@ function renderCustomerPurchasesPage(){
  navSetup();
 }
 function adminPage(){
+ if(S.view==='admin-records'){renderAdminRecordsPage();return}if(S.view==='customer-purchases'){renderCustomerPurchasesPage();return}
  S.view='admin';navSetup();$('#breadcrumbCurrent').textContent='Admin dashboard';
  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view==='admin'));
  const root=$('#pageContent'),pending=allP.filter(p=>p.verification==='pending').length;
